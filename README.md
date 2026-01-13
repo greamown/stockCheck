@@ -33,6 +33,8 @@ Example crontab:
 Notes
 - The AI summary uses Gemini. Set GEMINI_API_KEY.
 - LINE Messaging API needs LINE_CHANNEL_ACCESS_TOKEN and LINE_USER_ID (add the bot as a friend to get the user ID).
+- Optional Flex messages: set LINE_USE_FLEX=true to send a Flex bubble template.
+- LINE push uses `line-bot-sdk`; it's included in requirements.txt.
 - FinMind (TW institutional data) is optional; set FINMIND_API_KEY to enable.
 - SQLite output defaults to data/reports.db; override with REPORT_DB_PATH.
 - News comes from yfinance and may be missing for some tickers.
