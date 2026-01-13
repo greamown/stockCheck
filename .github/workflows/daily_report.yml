@@ -1,0 +1,44 @@
+name: Daily Stock Report
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run TW report (14:00 TST)
+        if: github.event.schedule == '0 6 * * *'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+          FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
+          REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
+        run: python scripts/run_tw.py
+
+      - name: Run US report (05:00 TST)
+        if: github.event.schedule == '0 21 * * *'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+          FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
+          REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
+        run: python scripts/run_us.py
