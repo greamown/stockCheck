@@ -5,7 +5,7 @@ Overview
 - Fetch prices, indices, and recent news via yfinance
 - Add TW institutional net buy/sell from FinMind (optional)
 - Detect earnings-day tickers and highlight reminders
-- Send a daily summary through Gemini API and LINE Notify
+- Send a daily summary through Gemini API and LINE Messaging API
 - Store AI predictions in SQLite for weekly accuracy checks
 
 Setup
@@ -32,7 +32,7 @@ Example crontab:
 
 Notes
 - The AI summary uses Gemini. Set GEMINI_API_KEY.
-- LINE Notify requires a token. Set LINE_NOTIFY_TOKEN.
+- LINE Messaging API needs LINE_CHANNEL_ACCESS_TOKEN and LINE_USER_ID (add the bot as a friend to get the user ID).
 - FinMind (TW institutional data) is optional; set FINMIND_API_KEY to enable.
 - SQLite output defaults to data/reports.db; override with REPORT_DB_PATH.
 - News comes from yfinance and may be missing for some tickers.

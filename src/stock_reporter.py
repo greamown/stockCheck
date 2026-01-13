@@ -271,16 +271,28 @@ def build_message(
     return "\n".join(lines)
 
 
-def send_line_notify(message: str) -> None:
-    token = os.getenv("LINE_NOTIFY_TOKEN", "")
-    if not token:
-        print("LINE_NOTIFY_TOKEN not set; skipping LINE notify.")
+def send_line_message(message: str) -> None:
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+    user_id = os.getenv("LINE_USER_ID", "")
+    if not token or not user_id:
+        print("LINE credentials not set; skipping LINE Messaging API push.")
         return
 
     response = requests.post(
-        "https://notify-api.line.me/api/notify",
-        headers={"Authorization": f"Bearer {token}"},
-        data={"message": message},
+        "https://api.line.me/v2/bot/message/push",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "to": user_id,
+            "messages": [
+                {
+                    "type": "text",
+                    "text": message,
+                }
+            ],
+        },
         timeout=30,
     )
     response.raise_for_status()
@@ -538,7 +550,7 @@ def run(market: str, subscription_path: str) -> None:
     )
 
     print(message)
-    send_line_notify(message)
+    send_line_message(message)
 
 
 if __name__ == "__main__":
