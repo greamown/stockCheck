@@ -27,7 +27,8 @@ try:
         PushMessageRequest,
         TextMessage,
     )
-except Exception:  # pragma: no cover - optional dependency at runtime
+    LINE_SDK_IMPORT_ERROR = ""
+except Exception as exc:  # pragma: no cover - optional dependency at runtime
     ApiException = None
     ApiClient = None
     Configuration = None
@@ -36,6 +37,7 @@ except Exception:  # pragma: no cover - optional dependency at runtime
     MessagingApi = None
     PushMessageRequest = None
     TextMessage = None
+    LINE_SDK_IMPORT_ERROR = str(exc)
 
 
 @dataclass
@@ -239,7 +241,8 @@ def parse_ai_response(response_text: str, symbols: List[str]) -> Dict[str, Any]:
     try:
         payload = json.loads(response_text)
     except json.JSONDecodeError:
-        print("Gemini response was not valid JSON; using raw text as summary.")
+        snippet = response_text.replace("\n", " ")[:200]
+        print(f"Gemini response was not valid JSON; using raw text. Snippet: {snippet}")
         return {"summary": response_text, "predictions": {}, "market_notes": ""}
 
     summary = str(payload.get("summary", "")).strip()
@@ -358,7 +361,8 @@ def send_line_message(message: str) -> None:
         print("LINE credentials not set; skipping LINE Messaging API push.")
         return
     if ApiClient is None or Configuration is None or MessagingApi is None:
-        print("line-bot-sdk not installed; skipping LINE Messaging API push.")
+        detail = f" ({LINE_SDK_IMPORT_ERROR})" if LINE_SDK_IMPORT_ERROR else ""
+        print(f"line-bot-sdk not installed; skipping LINE Messaging API push.{detail}")
         return
 
     configuration = Configuration(access_token=token)
