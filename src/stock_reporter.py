@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -11,7 +12,7 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 try:
-    import google.generativeai as genai
+    from google import genai
 except Exception:  # pragma: no cover - optional dependency at runtime
     genai = None
 
@@ -71,9 +72,33 @@ def get_market_timezone(market: str) -> ZoneInfo:
     return ZoneInfo("America/New_York")
 
 
+def get_yfinance_settings() -> Dict[str, float]:
+    retries = int(os.getenv("YFINANCE_RETRIES", "3") or 3)
+    delay_sec = float(os.getenv("YFINANCE_DELAY_SEC", "1.5") or 1.5)
+    return {"retries": retries, "delay_sec": delay_sec}
+
+
+def fetch_history(ticker: yf.Ticker, period: str, retries: Optional[int] = None, delay_sec: Optional[float] = None):
+    settings = get_yfinance_settings()
+    retries = settings["retries"] if retries is None else retries
+    delay_sec = settings["delay_sec"] if delay_sec is None else delay_sec
+
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            return ticker.history(period=period)
+        except Exception as exc:
+            last_error = exc
+            print(f"History fetch failed period={period} attempt={attempt}: {exc}")
+            time.sleep(delay_sec)
+    if last_error:
+        raise last_error
+    return ticker.history(period=period)
+
+
 def get_price_snapshot(symbol: str, report_date: datetime.date) -> TickerSnapshot:
     ticker = yf.Ticker(symbol)
-    history = ticker.history(period="2d")
+    history = fetch_history(ticker, "2d")
     if history.empty:
         raise ValueError(f"No price data for {symbol}")
 
@@ -86,7 +111,7 @@ def get_price_snapshot(symbol: str, report_date: datetime.date) -> TickerSnapsho
 
     volume = float(latest.get("Volume", 0.0) or 0.0)
 
-    long_history = ticker.history(period="1y")
+    long_history = fetch_history(ticker, "1y")
     ma50 = float(long_history["Close"].tail(50).mean()) if not long_history.empty else 0.0
     ma200 = float(long_history["Close"].tail(200).mean()) if not long_history.empty else 0.0
 
@@ -133,7 +158,9 @@ def get_price_snapshot(symbol: str, report_date: datetime.date) -> TickerSnapsho
 def collect_market_data(symbols: List[str], report_date: datetime.date) -> List[TickerSnapshot]:
     snapshots = []
     for symbol in symbols:
-        snapshots.append(get_price_snapshot(symbol, report_date))
+        snapshot = get_price_snapshot(symbol, report_date)
+        print(f"Fetched {symbol} price={snapshot.price:.2f}")
+        snapshots.append(snapshot)
     return snapshots
 
 
@@ -191,26 +218,28 @@ def call_gemini(prompt: str) -> str:
     if not api_key:
         return "Gemini API key not set; skipped AI summary."
     if genai is None:
-        return "google-generativeai not installed; skipped AI summary."
+        return "google-genai not installed; skipped AI summary."
 
-    genai.configure(api_key=api_key)
     model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-    model = genai.GenerativeModel(
-        model_name,
-        generation_config={
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=model_name,
+        contents=prompt,
+        config={
             "temperature": 0.3,
             "max_output_tokens": 500,
             "response_mime_type": "application/json",
         },
     )
-    response = model.generate_content(prompt)
-    return (response.text or "").strip() or "Gemini response was empty."
+    text = getattr(response, "text", "") or ""
+    return text.strip() or "Gemini response was empty."
 
 
 def parse_ai_response(response_text: str, symbols: List[str]) -> Dict[str, Any]:
     try:
         payload = json.loads(response_text)
     except json.JSONDecodeError:
+        print("Gemini response was not valid JSON; using raw text as summary.")
         return {"summary": response_text, "predictions": {}, "market_notes": ""}
 
     summary = str(payload.get("summary", "")).strip()
@@ -560,6 +589,7 @@ def run(market: str, subscription_path: str) -> None:
     now = datetime.now(timezone)
     report_date = now.date()
     report_date_str = report_date.isoformat()
+    print(f"Run start market={market} date={report_date_str} watchlist={len(watchlist)}")
 
     if market == "tw":
         index_symbols = ["^TWII"]
@@ -568,10 +598,18 @@ def run(market: str, subscription_path: str) -> None:
 
     snapshots = collect_market_data(watchlist, report_date)
     indices = collect_market_data(index_symbols, report_date)
+    print(f"Fetched snapshots={len(snapshots)} indices={len(indices)}")
     institutional = collect_finmind_data(watchlist, report_date) if market == "tw" else []
+    if market == "tw":
+        print(
+            "FinMind enabled="
+            f"{bool(os.getenv('FINMIND_API_KEY'))} items={len(institutional)}"
+        )
 
+    print("Calling Gemini...")
     prompt = build_prompt(market, snapshots, indices, institutional, now.isoformat())
     ai_raw = call_gemini(prompt)
+    print(f"Gemini response length={len(ai_raw)}")
     parsed = parse_ai_response(ai_raw, [s.symbol for s in snapshots])
 
     ai_summary = parsed["summary"]
@@ -586,8 +624,10 @@ def run(market: str, subscription_path: str) -> None:
     conn = sqlite3.connect(db_path)
     try:
         init_db(conn)
+        print(f"DB save reports={len(snapshots)} path={db_path}")
         save_reports(conn, market, report_date_str, snapshots, ai_summary, predictions)
         accuracy_notes = compare_predictions(conn, market, report_date, snapshots, predictions)
+        print(f"Accuracy checks={len(accuracy_notes)}")
     finally:
         conn.close()
 

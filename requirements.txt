@@ -1,5 +1,5 @@
 yfinance
 requests
 python-dotenv
-google-generativeai
+google-genai
 line-bot-sdk

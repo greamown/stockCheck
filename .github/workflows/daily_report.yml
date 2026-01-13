@@ -24,9 +24,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run TW report (14:00 TST)
-        if: |
-          (github.event.schedule == '0 6 * * *') ||
-          (github.event_name == 'workflow_dispatch')
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
@@ -37,9 +35,7 @@ jobs:
         run: python scripts/run_tw.py
 
       - name: Run US report (05:00 TST)
-        if: |
-          (github.event.schedule == '0 21 * * *') ||
-          (github.event_name == 'workflow_dispatch')
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 21 * * *'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
