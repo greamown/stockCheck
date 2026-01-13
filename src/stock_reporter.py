@@ -13,11 +13,12 @@ from dotenv import load_dotenv
 
 try:
     from google import genai
+    from google.genai import errors as genai_errors
 except Exception:  # pragma: no cover - optional dependency at runtime
     genai = None
+    genai_errors = None
 
 try:
-    from linebot.v3.exceptions import ApiException
     from linebot.v3.messaging import (
         ApiClient,
         Configuration,
@@ -29,7 +30,6 @@ try:
     )
     LINE_SDK_IMPORT_ERROR = ""
 except Exception as exc:  # pragma: no cover - optional dependency at runtime
-    ApiException = None
     ApiClient = None
     Configuration = None
     FlexContainer = None
@@ -119,28 +119,30 @@ def get_price_snapshot(symbol: str, report_date: datetime.date) -> TickerSnapsho
 
     earnings_date = ""
     earnings_today = False
-    try:
-        calendar = ticker.calendar
-        if not calendar.empty:
-            earnings_ts = calendar.iloc[0, 0]
-            earnings_date = str(earnings_ts.date())
-            earnings_today = earnings_ts.date() == report_date
-    except Exception:
-        earnings_date = ""
-        earnings_today = False
-
     news_items = []
-    try:
-        for item in (ticker.news or [])[:3]:
-            news_items.append(
-                {
-                    "title": item.get("title", ""),
-                    "link": item.get("link", ""),
-                    "publisher": item.get("publisher", ""),
-                }
-            )
-    except Exception:
-        news_items = []
+    is_index = symbol.startswith("^")
+    if not is_index:
+        try:
+            calendar = ticker.calendar
+            if not calendar.empty:
+                earnings_ts = calendar.iloc[0, 0]
+                earnings_date = str(earnings_ts.date())
+                earnings_today = earnings_ts.date() == report_date
+        except Exception:
+            earnings_date = ""
+            earnings_today = False
+
+        try:
+            for item in (ticker.news or [])[:3]:
+                news_items.append(
+                    {
+                        "title": item.get("title", ""),
+                        "link": item.get("link", ""),
+                        "publisher": item.get("publisher", ""),
+                    }
+                )
+        except Exception:
+            news_items = []
 
     return TickerSnapshot(
         symbol=symbol,
@@ -205,13 +207,53 @@ def build_prompt(
         ],
     }
     return (
-        "You are a financial assistant. Summarize the daily market situation for retail investors. "
-        "Use the data provided and keep it short and actionable. Provide bullets: price move, "
-        "trend vs 50/200 MA, earnings date if present, and 1-2 news highlights. "
-        "If data is missing, say so. Output JSON only with keys: "
-        "summary (string), predictions (object mapping symbol to up/down/neutral), market_notes (string). "
-        "Predictions should be for the next 5 trading days. Data: "
-        + json.dumps(data)
+        "請用中文輸出，總字數 400~600 字，必須達到 400 字以上，"
+        "格式固定三段且不要加標題符號："
+        "第一段「大盤」總結指數與市場氛圍；"
+        "第二段「重要個股」挑選 2-4 檔有代表性的標的說明漲跌與原因；"
+        "第三段「風險」提醒可能的風險/不確定性。"
+        "不要使用 Markdown 或 JSON，只輸出純文字。資料如下："
+        + json.dumps(data, ensure_ascii=False)
+    )
+
+
+def build_fallback_summary(
+    market: str,
+    snapshots: List[TickerSnapshot],
+    indices: List[TickerSnapshot],
+    institutional: List[InstitutionalSnapshot],
+) -> str:
+    index_lines = []
+    for item in indices:
+        index_lines.append(
+            f"{item.symbol} {item.price:.2f}（{item.change:+.2f}，{item.change_pct:+.2f}%）"
+        )
+    index_text = "，".join(index_lines) if index_lines else "指數資料不足"
+
+    watchlist_lines = []
+    for item in snapshots[:4]:
+        trend = "強勢" if item.price >= item.ma50 >= item.ma200 else "偏弱"
+        watchlist_lines.append(
+            f"{item.symbol} 收於 {item.price:.2f}（{item.change_pct:+.2f}%），"
+            f"50/200 日均線 {item.ma50:.2f}/{item.ma200:.2f}，走勢{trend}"
+        )
+    watchlist_text = "；".join(watchlist_lines) if watchlist_lines else "個股資料不足"
+
+    inst_text = ""
+    if institutional:
+        inst_lines = []
+        for item in institutional[:3]:
+            inst_lines.append(f"{item.symbol} 三大法人淨額 {item.total_net:+,.0f}")
+        inst_text = "，" + "；".join(inst_lines)
+
+    risk_text = "需留意財報結果、匯率波動與全球大盤情緒變化，若量能不足，短線波動可能放大。"
+
+    market_name = "台股" if market == "tw" else "美股"
+    return (
+        f"大盤：{market_name} 指數 {index_text}，整體氣氛以區間震盪為主，短線留意量能與"
+        f"法人動向{inst_text}。"
+        f"重要個股：{watchlist_text}，可觀察是否站回 50 日線或跌破支撐，作為短線動能判斷。"
+        f"風險：{risk_text}"
     )
 
 
@@ -224,41 +266,69 @@ def call_gemini(prompt: str) -> str:
 
     model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-        config={
-            "temperature": 0.3,
-            "max_output_tokens": 500,
-            "response_mime_type": "application/json",
-        },
-    )
-    text = getattr(response, "text", "") or ""
-    return text.strip() or "Gemini response was empty."
+    max_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "600") or 600)
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config={
+                "temperature": 0.3,
+                "max_output_tokens": max_tokens,
+                "response_mime_type": "text/plain",
+            },
+        )
+        text = getattr(response, "text", "") or ""
+        return text.strip() or "Gemini response was empty."
+    except Exception as exc:
+        message = str(exc)
+        if "RESOURCE_EXHAUSTED" in message or "quota" in message.lower():
+            print("Gemini quota exhausted; skipping AI summary for now.")
+            return "GEMINI_QUOTA_EXCEEDED"
+        raise
+
+
+def call_openrouter(prompt: str) -> str:
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        return "OPENROUTER_API_KEY not set; skipped."
+
+    model_name = os.getenv("OPENROUTER_MODEL", "google/gemma-2-9b-it:free")
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": os.getenv("OPENROUTER_REFERER", "http://localhost"),
+                "X-Title": os.getenv("OPENROUTER_TITLE", "stockCheck"),
+            },
+            json={
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "600") or 600),
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        choice = (payload.get("choices") or [{}])[0]
+        content = choice.get("message", {}).get("content", "")
+        return content.strip() or "OpenRouter response was empty."
+    except requests.HTTPError as exc:
+        detail = ""
+        try:
+            detail = response.text
+        except Exception:
+            detail = ""
+        print(f"OpenRouter request failed: {exc} {detail}")
+        return "OPENROUTER_FAILED"
 
 
 def parse_ai_response(response_text: str, symbols: List[str]) -> Dict[str, Any]:
-    try:
-        payload = json.loads(response_text)
-    except json.JSONDecodeError:
-        snippet = response_text.replace("\n", " ")[:200]
-        print(f"Gemini response was not valid JSON; using raw text. Snippet: {snippet}")
-        return {"summary": response_text, "predictions": {}, "market_notes": ""}
-
-    summary = str(payload.get("summary", "")).strip()
-    predictions = payload.get("predictions", {})
-    if not isinstance(predictions, dict):
-        predictions = {}
-
-    normalized = {}
-    for symbol in symbols:
-        value = str(predictions.get(symbol, "")).strip().lower()
-        if value not in {"up", "down", "neutral"}:
-            value = "unknown"
-        normalized[symbol] = value
-
-    market_notes = str(payload.get("market_notes", "")).strip()
-    return {"summary": summary, "predictions": normalized, "market_notes": market_notes}
+    summary = response_text.strip()
+    predictions = {symbol: "unknown" for symbol in symbols}
+    return {"summary": summary, "predictions": predictions, "valid_json": True}
 
 
 def format_snapshot(snapshot: TickerSnapshot) -> str:
@@ -283,7 +353,6 @@ def build_message(
     institutional: List[InstitutionalSnapshot],
     ai_summary: str,
     predictions: Dict[str, str],
-    market_notes: str,
     earnings_reminder: str,
     accuracy_notes: List[str],
 ) -> str:
@@ -304,17 +373,6 @@ def build_message(
     lines.append("")
     lines.append("AI Summary:")
     lines.append(ai_summary or "N/A")
-
-    if predictions:
-        lines.append("")
-        lines.append("Predictions (next 5 trading days):")
-        for symbol, value in predictions.items():
-            lines.append(f"{symbol}: {value}")
-
-    if market_notes:
-        lines.append("")
-        lines.append("Market Notes:")
-        lines.append(market_notes)
 
     if accuracy_notes:
         lines.append("")
@@ -380,7 +438,7 @@ def send_line_message(message: str) -> None:
 
             messaging_api.push_message(PushMessageRequest(to=user_id, messages=payload))
             print("✅ 訊息發送成功！")
-        except ApiException as exc:
+        except Exception as exc:
             print(f"❌ 訊息發送失敗，錯誤原因: {exc}")
             raise RuntimeError(f"LINE Messaging API failed: {exc}") from exc
 
@@ -544,6 +602,8 @@ def compare_predictions(
             continue
 
         report_price, ai_prediction = row
+        if ai_prediction == "unknown":
+            continue
         ai_prediction = ai_prediction or predictions.get(snapshot.symbol, "unknown")
         if snapshot.price > report_price:
             actual_direction = "up"
@@ -615,10 +675,45 @@ def run(market: str, subscription_path: str) -> None:
     ai_raw = call_gemini(prompt)
     print(f"Gemini response length={len(ai_raw)}")
     parsed = parse_ai_response(ai_raw, [s.symbol for s in snapshots])
-
     ai_summary = parsed["summary"]
+    if "GEMINI_QUOTA_EXCEEDED" in ai_summary:
+        print("Gemini quota exceeded; trying OpenRouter fallback.")
+        ai_summary = call_openrouter(prompt)
+        if "OPENROUTER_API_KEY not set" in ai_summary or "OPENROUTER_FAILED" in ai_summary:
+            print("OpenRouter not available; sending AI unavailable message.")
+            ai_summary = "AI 無法回復，請稍後再試。"
+    elif len(ai_summary) < 400:
+        print("Gemini summary too short; retrying with stricter instruction.")
+        retry_prompt = (
+            "請用中文輸出，總字數 400~600 字，必須達到 400 字以上。"
+            "務必包含三段內容：大盤、重要個股、風險。"
+            "不要使用 Markdown 或 JSON，只輸出純文字。資料如下："
+            + json.dumps(
+                {
+                    "market": market,
+                    "watchlist": [snapshot_to_dict(s) for s in snapshots],
+                    "indices": [snapshot_to_dict(s) for s in indices],
+                    "institutional": [
+                        {
+                            "symbol": item.symbol,
+                            "date": item.date,
+                            "total_net": item.total_net,
+                            "net_by_name": item.net_by_name,
+                        }
+                        for item in institutional
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+        ai_raw = call_gemini(retry_prompt)
+        parsed = parse_ai_response(ai_raw, [s.symbol for s in snapshots])
+        ai_summary = parsed["summary"]
+    if len(ai_summary) < 400:
+        print("Gemini summary still short; using fallback summary.")
+        ai_summary = build_fallback_summary(market, snapshots, indices, institutional)
+
     predictions = parsed["predictions"]
-    market_notes = parsed["market_notes"]
 
     earnings_today = [s.symbol for s in snapshots if s.earnings_today]
     earnings_reminder = ", ".join(earnings_today)
@@ -642,11 +737,12 @@ def run(market: str, subscription_path: str) -> None:
         institutional,
         ai_summary,
         predictions,
-        market_notes,
         earnings_reminder,
         accuracy_notes,
     )
 
+    print(f"AI summary length={len(ai_summary)}")
+    print(f"LINE message length={len(message)}")
     print(message)
     send_line_message(message)
 

@@ -32,6 +32,8 @@ Example crontab:
 
 Notes
 - The AI summary uses Gemini (google-genai). Set GEMINI_API_KEY.
+- Gemini output length can be limited with GEMINI_MAX_OUTPUT_TOKENS (default 600).
+- If Gemini quota is exhausted, it will try OpenRouter (OPENROUTER_API_KEY / OPENROUTER_MODEL).
 - LINE Messaging API needs LINE_CHANNEL_ACCESS_TOKEN and LINE_USER_ID (add the bot as a friend to get the user ID).
 - Optional Flex messages: set LINE_USE_FLEX=true to send a Flex bubble template.
 - LINE push uses `line-bot-sdk`; it's included in requirements.txt.
