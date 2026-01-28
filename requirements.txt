@@ -3,3 +3,6 @@ requests
 python-dotenv
 google-genai
 line-bot-sdk
+pandas
+pandas-ta
+beautifulsoup4

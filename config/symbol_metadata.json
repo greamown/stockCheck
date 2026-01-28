@@ -1,0 +1,31 @@
+{
+  "us": {
+    "NVDA": {
+      "name": "NVIDIA",
+      "cik": "0001045810",
+      "query": "NVIDIA stock"
+    },
+    "INTC": {
+      "name": "Intel",
+      "cik": "0000050863",
+      "query": "Intel stock"
+    },
+    "AMD": {
+      "name": "AMD",
+      "cik": "0000002488",
+      "query": "AMD stock"
+    }
+  },
+  "tw": {
+    "2395.TW": {
+      "name": "Advantech",
+      "finmind_id": "2395",
+      "query": "Advantech 2395 stock"
+    },
+    "2465.TW": {
+      "name": "Leadtek",
+      "finmind_id": "2465",
+      "query": "Leadtek 2465 stock"
+    }
+  }
+}

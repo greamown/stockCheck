@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stockcheck"
+version = "0.1.0"
+description = "Stock daily reporter and data pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "yfinance",
+  "requests",
+  "python-dotenv",
+  "google-genai",
+  "line-bot-sdk",
+  "pandas",
+  "pandas-ta",
+  "beautifulsoup4",
+]
+
+[project.scripts]
+stockcheck-pipeline = "stockcheck.daily_pipeline:main"
+stockcheck-reporter = "stockcheck.stock_reporter:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
