@@ -24,6 +24,26 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
+      - name: Run TW pipeline (14:00 TST)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
+          REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
+          PIPELINE_DB_PATH: ${{ secrets.PIPELINE_DB_PATH }}
+        run: python scripts/run_pipeline.py --market tw
+
+      - name: Check TW pipeline DB
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
+        env:
+          PIPELINE_DB_PATH: ${{ secrets.PIPELINE_DB_PATH }}
+        run: |
+          echo "PIPELINE_DB_PATH=${PIPELINE_DB_PATH:-data/market_data.db}"
+          ls -lah "${PIPELINE_DB_PATH:-data/market_data.db}" || true
+
       - name: Run TW report (14:00 TST)
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
         env:
@@ -33,7 +53,28 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
           REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
+          PIPELINE_DB_PATH: ${{ secrets.PIPELINE_DB_PATH }}
         run: python scripts/run_reporter.py --market tw
+
+      - name: Run US pipeline (05:00 TST)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 21 * * *'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
+          REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
+          PIPELINE_DB_PATH: ${{ secrets.PIPELINE_DB_PATH }}
+        run: python scripts/run_pipeline.py --market us
+
+      - name: Check US pipeline DB
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 21 * * *'
+        env:
+          PIPELINE_DB_PATH: ${{ secrets.PIPELINE_DB_PATH }}
+        run: |
+          echo "PIPELINE_DB_PATH=${PIPELINE_DB_PATH:-data/market_data.db}"
+          ls -lah "${PIPELINE_DB_PATH:-data/market_data.db}" || true
 
       - name: Run US report (05:00 TST)
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 21 * * *'
@@ -44,4 +85,5 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
           REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
+          PIPELINE_DB_PATH: ${{ secrets.PIPELINE_DB_PATH }}
         run: python scripts/run_reporter.py --market us
