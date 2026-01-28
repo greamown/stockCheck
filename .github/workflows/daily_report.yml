@@ -32,7 +32,7 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
           REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
-        run: python scripts/run_tw.py
+        run: python scripts/run_reporter.py --market tw
 
       - name: Run US report (05:00 TST)
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 21 * * *'
@@ -43,4 +43,4 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           FINMIND_API_KEY: ${{ secrets.FINMIND_API_KEY }}
           REPORT_DB_PATH: ${{ secrets.REPORT_DB_PATH }}
-        run: python scripts/run_us.py
+        run: python scripts/run_reporter.py --market us
