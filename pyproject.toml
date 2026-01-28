@@ -15,7 +15,6 @@ dependencies = [
   "google-genai",
   "line-bot-sdk",
   "pandas",
-  "pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git",
   "beautifulsoup4",
 ]
 
