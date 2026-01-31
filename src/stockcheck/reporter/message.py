@@ -75,6 +75,7 @@ def build_message(
     earnings_reminder: str,
     accuracy_notes: List[str],
     pipeline_context: Dict[str, Any] | None = None,
+    citations: List[Dict[str, str]] | None = None,
 ) -> str:
     """Build a clean, consistent plain-text message for messaging apps.
 
@@ -122,6 +123,19 @@ def build_message(
 
     lines.append("【AI 摘要】")
     lines.append((ai_summary or "N/A").strip())
+
+    if citations:
+        lines.append("【AI 引用新聞】")
+        for item in citations[:3]:
+            sym = (item.get("symbol") or "").strip()
+            title = (item.get("title") or "").strip()
+            url = (item.get("url") or "").strip()
+            if not sym or not title:
+                continue
+            if url:
+                lines.append(f"- {sym}：{title}\n  {url}")
+            else:
+                lines.append(f"- {sym}：{title}")
 
     if accuracy_notes:
         lines.append("【近 7 次預測回測】")

@@ -107,12 +107,15 @@ def build_prompt(
     schema = {
         "summary": "string (Chinese, 400-600 chars, 3 paragraphs: 大盤/重要個股/風險)",
         "predictions": "object mapping symbol -> up|down|neutral",
+        "citations": "array of objects {symbol, title, url} (引用到的新聞；至少 1 則，最多 3 則)",
     }
     return (
         "請用中文輸出 JSON，且只輸出 JSON。"
         "summary 需 400-600 字，分成三段：大盤、重要個股、風險。"
         "predictions 要針對 watchlist symbol，輸出 up/down/neutral。"
-        "請在 summary 的『重要個股』段落，至少引用 1-2 則 watchlist[*].news 的標題重點（不用逐字貼全文）。"
+        "你必須閱讀 watchlist[*].news，並在輸出 JSON 裡提供 citations："
+        "列出你在 summary 內引用到的新聞（至少 1 則，最多 3 則），"
+        "每筆包含 symbol、title、url。"
         "JSON schema: "
         + json.dumps(schema, ensure_ascii=False)
         + "資料如下："
@@ -274,6 +277,7 @@ def parse_ai_response(response_text: str, symbols: List[str]) -> Dict[str, Any]:
     parsed = _extract_json(response_text)
     summary = response_text.strip()
     predictions = {symbol: "unknown" for symbol in symbols}
+    citations: List[Dict[str, str]] = []
     valid_json = False
 
     if parsed:
@@ -286,4 +290,20 @@ def parse_ai_response(response_text: str, symbols: List[str]) -> Dict[str, Any]:
                 if value in {"up", "down", "neutral"}:
                     predictions[symbol] = value
 
-    return {"summary": summary, "predictions": predictions, "valid_json": valid_json}
+        parsed_citations = parsed.get("citations", []) or []
+        if isinstance(parsed_citations, list):
+            for item in parsed_citations[:3]:
+                if not isinstance(item, dict):
+                    continue
+                sym = str(item.get("symbol", "")).strip()
+                title = str(item.get("title", "")).strip()
+                url = str(item.get("url", "")).strip()
+                if sym and title:
+                    citations.append({"symbol": sym, "title": title, "url": url})
+
+    return {
+        "summary": summary,
+        "predictions": predictions,
+        "citations": citations,
+        "valid_json": valid_json,
+    }

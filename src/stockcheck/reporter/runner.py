@@ -76,6 +76,7 @@ def run(market: str, subscription_path: str) -> None:
     print(f"Gemini response length={len(ai_raw)}")
     parsed = ai.parse_ai_response(ai_raw, [s.symbol for s in snapshots])
     ai_summary = parsed["summary"]
+    citations = parsed.get("citations", [])
 
     if "GEMINI_QUOTA_EXCEEDED" in ai_summary or "GEMINI_FAILED" in ai_summary:
         print("Gemini unavailable; trying OpenRouter fallback.")
@@ -94,10 +95,12 @@ def run(market: str, subscription_path: str) -> None:
                 pipeline_context,
             )
             parsed = {"predictions": {s.symbol: "unknown" for s in snapshots}, "valid_json": False}
+            citations = []
             allow_retry = False
         else:
             parsed = ai.parse_ai_response(ai_raw, [s.symbol for s in snapshots])
             ai_summary = parsed["summary"]
+            citations = parsed.get("citations", [])
     elif "skipped AI summary" in ai_summary:
         ai_summary = ai.build_fallback_summary(
             market,
@@ -107,9 +110,14 @@ def run(market: str, subscription_path: str) -> None:
             pipeline_context,
         )
         parsed = {"predictions": {s.symbol: "unknown" for s in snapshots}, "valid_json": False}
+        citations = []
         allow_retry = False
 
-    if allow_retry and (not parsed.get("valid_json") or len(ai_summary) < 400):
+    if allow_retry and (
+        (not parsed.get("valid_json"))
+        or len(ai_summary) < 400
+        or (not citations)
+    ):
         print("Gemini summary invalid/short; retrying with stricter instruction.")
         retry_prompt = (
             "請用中文輸出 JSON，且只輸出 JSON。summary 需 400-600 字，"
@@ -136,6 +144,7 @@ def run(market: str, subscription_path: str) -> None:
         ai_raw = ai.call_gemini(retry_prompt)
         parsed = ai.parse_ai_response(ai_raw, [s.symbol for s in snapshots])
         ai_summary = parsed["summary"]
+        citations = parsed.get("citations", [])
 
     if len(ai_summary) < 400:
         print("Gemini summary still short; using fallback summary.")
@@ -174,6 +183,7 @@ def run(market: str, subscription_path: str) -> None:
         earnings_reminder,
         accuracy_notes,
         pipeline_context=pipeline_context,
+        citations=citations,
     )
 
     print(f"AI summary length={len(ai_summary)}")
