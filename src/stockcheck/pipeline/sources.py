@@ -3,6 +3,8 @@ import html
 from datetime import date, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, unquote, urlparse
+
 from bs4 import BeautifulSoup
 
 from .models import PriceRow
@@ -116,6 +118,76 @@ def filter_by_date(rows: List[PriceRow], start_date: date, end_date: date) -> Li
     return filtered
 
 
+def _extract_original_url(maybe_google_news_url: str) -> str:
+    """Try to extract the original publisher URL from a Google News redirect URL.
+
+    Google News often uses intermediate URLs such as:
+    - https://news.google.com/rss/articles/...
+    - https://news.google.com/articles/...
+
+    The final redirected URL sometimes includes a `url=` query parameter pointing to the
+    original news source.
+    """
+
+    if not maybe_google_news_url:
+        return ""
+
+    try:
+        parsed = urlparse(maybe_google_news_url)
+        qs = parse_qs(parsed.query)
+        if "url" in qs and qs["url"]:
+            return unquote(qs["url"][0])
+    except Exception:
+        return maybe_google_news_url
+
+    return maybe_google_news_url
+
+
+def resolve_google_news_url(url: str) -> str:
+    """Resolve Google News RSS/article URLs to the original publisher URL when possible.
+
+    Falls back to the input URL on any failure.
+    """
+
+    if not url:
+        return ""
+    if "news.google.com" not in url:
+        return url
+
+    try:
+        response = request_with_retry(url, headers=get_http_headers(), timeout=20)
+        # request_with_retry may follow redirects depending on underlying implementation.
+        # If it does, response.url becomes the final resolved URL.
+        final_url = getattr(response, "url", "") or url
+        extracted = _extract_original_url(final_url)
+        if extracted and extracted != final_url:
+            return extracted
+
+        # As a fallback, try to extract from HTML content.
+        text = getattr(response, "text", "") or ""
+        if text:
+            # Some pages include a canonical/redirect target with url=...
+            for token in ("url=", "URL="):
+                idx = text.find(token)
+                if idx != -1:
+                    tail = text[idx: idx + 2000]
+                    # naive parse: take substring after url= until delimiter
+                    start = tail.find(token)
+                    if start != -1:
+                        start += len(token)
+                        end = len(tail)
+                        for delim in ("\"", "'", "&", "<", ">", " "):
+                            pos = tail.find(delim, start)
+                            if pos != -1:
+                                end = min(end, pos)
+                        candidate = unquote(tail[start:end])
+                        if candidate.startswith("http"):
+                            return candidate
+        return extracted or final_url
+    except Exception:
+        return url
+
+
 def parse_rss_items(xml_text: str) -> List[Dict[str, str]]:
     import xml.etree.ElementTree as ET
 
@@ -134,7 +206,10 @@ def parse_rss_items(xml_text: str) -> List[Dict[str, str]]:
                 published_at = parsedate_to_datetime(pub).isoformat()
             except Exception:
                 published_at = ""
-        items.append({"title": title, "url": link, "published_at": published_at})
+
+        # Improve readability: resolve Google News redirect URLs when possible.
+        resolved = resolve_google_news_url(link) if link else ""
+        items.append({"title": title, "url": resolved or link, "published_at": published_at})
     return items
 
 

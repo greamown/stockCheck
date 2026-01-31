@@ -37,6 +37,16 @@ def _normalize_news(items: Any) -> List[Dict[str, str]]:
     return normalized
 
 
+def _short_domain(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        host = urlparse(url).netloc
+        return host.replace("www.", "") if host else ""
+    except Exception:
+        return ""
+
+
 def format_snapshot_line(snapshot: TickerSnapshot, prediction: str) -> str:
     return (
         f"- {snapshot.symbol} {snapshot.price:.2f}（{snapshot.change_pct:+.2f}%）"
@@ -98,10 +108,13 @@ def build_message(
                     title = item.get("title", "").strip()
                     source = item.get("source", "unknown").strip()
                     url = item.get("url", "").strip()
+                    domain = _short_domain(url) if url else ""
+                    meta = " / ".join([p for p in [domain, source] if p])
+                    meta = f"（{meta}）" if meta else ""
                     if url:
-                        lines.append(f"  - {title}（{source}）\n    {url}")
+                        lines.append(f"  - {title}{meta}\n    {url}")
                     else:
-                        lines.append(f"  - {title}（{source}）")
+                        lines.append(f"  - {title}{meta}")
 
     if institutional:
         lines.append("【三大法人（FinMind）】")
