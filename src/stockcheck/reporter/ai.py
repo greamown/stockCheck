@@ -130,45 +130,52 @@ def build_fallback_summary(
     institutional: List[InstitutionalSnapshot],
     pipeline_context: Dict[str, Any],
 ) -> str:
+    # Keep fallback readable and consistent with the main report style.
+    # Use 3 clear sections: 【大盤】/【個股】/【風險】.
+
     index_lines = []
     for item in indices:
-        index_lines.append(
-            f"{item.symbol} {item.price:.2f}（{item.change:+.2f}，{item.change_pct:+.2f}%）"
-        )
-    index_text = "，".join(index_lines) if index_lines else "指數資料不足"
+        index_lines.append(f"{item.symbol} {item.price:.2f}（{item.change_pct:+.2f}%）")
+    index_text = "、".join(index_lines) if index_lines else "指數資料不足"
 
-    watchlist_lines = []
-    for item in snapshots[:4]:
-        if item.ma50 <= 0 or item.ma200 <= 0:
-            trend = "資料不足"
-        else:
-            trend = "強勢" if item.price >= item.ma50 >= item.ma200 else "偏弱"
-        news_note = ""
-        context = pipeline_context.get(item.symbol, {})
-        news_items = context.get("news") or []
-        if news_items:
-            news_note = f"，焦點：{news_items[0].get('title', '')[:20]}"
-        watchlist_lines.append(
-            f"{item.symbol} 收於 {item.price:.2f}（{item.change_pct:+.2f}%），"
-            f"50/200 日均線 {item.ma50:.2f}/{item.ma200:.2f}，走勢{trend}{news_note}"
-        )
-    watchlist_text = "；".join(watchlist_lines) if watchlist_lines else "個股資料不足"
+    market_name = "台股" if market == "tw" else "美股"
 
     inst_text = ""
     if institutional:
         inst_lines = []
         for item in institutional[:3]:
-            inst_lines.append(f"{item.symbol} 三大法人淨額 {item.total_net:+,.0f}")
-        inst_text = "，" + "；".join(inst_lines)
+            inst_lines.append(f"{item.symbol} 法人淨額 {item.total_net:+,.0f}")
+        inst_text = "；" + "、".join(inst_lines)
 
-    risk_text = "需留意財報結果、匯率波動與全球大盤情緒變化，若量能不足，短線波動可能放大。"
+    stock_lines = []
+    for item in snapshots[:4]:
+        if item.ma50 <= 0 or item.ma200 <= 0:
+            trend = "資料不足"
+        else:
+            trend = "偏強" if item.price >= item.ma50 >= item.ma200 else "偏弱"
 
-    market_name = "台股" if market == "tw" else "美股"
+        news_hint = ""
+        ctx = pipeline_context.get(item.symbol, {}) if isinstance(pipeline_context, dict) else {}
+        news_items = ctx.get("news") or []
+        if isinstance(news_items, list) and news_items:
+            title = str((news_items[0] or {}).get("title", "")).strip()
+            if title:
+                news_hint = f"｜新聞：{title[:28]}"
+
+        stock_lines.append(
+            f"- {item.symbol} {item.price:.2f}（{item.change_pct:+.2f}%）"
+            f"｜MA50/200 {item.ma50:.2f}/{item.ma200:.2f}｜趨勢：{trend}{news_hint}"
+        )
+
+    if not stock_lines:
+        stock_lines = ["- 個股資料不足"]
+
+    risk_text = "留意財報/法說、匯率與國際盤波動；若量能不足，短線震盪可能放大。"
+
     return (
-        f"大盤：{market_name} 指數 {index_text}，整體氣氛以區間震盪為主，短線留意量能與"
-        f"法人動向{inst_text}。"
-        f"重要個股：{watchlist_text}，可觀察是否站回 50 日線或跌破支撐，作為短線動能判斷。"
-        f"風險：{risk_text}"
+        f"【大盤】{market_name} 指數 {index_text}，偏區間震盪，留意量能與法人動向{inst_text}\n"
+        f"【個股】\n" + "\n".join(stock_lines) + "\n"
+        f"【風險】{risk_text}"
     )
 
 
