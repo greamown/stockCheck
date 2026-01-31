@@ -68,11 +68,18 @@ def get_price_snapshot(symbol: str, report_date: datetime.date) -> TickerSnapsho
 
         try:
             for item in (ticker.news or [])[:3]:
+                # Normalize schema to match pipeline news_items: title/url/published_at/source
+                url = item.get("link", "") or item.get("url", "") or ""
+                publisher = item.get("publisher", "") or ""
+                title = item.get("title", "") or ""
+                if not title and not url:
+                    continue
                 news_items.append(
                     {
-                        "title": item.get("title", ""),
-                        "link": item.get("link", ""),
-                        "publisher": item.get("publisher", ""),
+                        "title": title,
+                        "url": url,
+                        "published_at": "",
+                        "source": f"yfinance{(':' + publisher) if publisher else ''}",
                     }
                 )
         except Exception:

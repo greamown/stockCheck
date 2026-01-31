@@ -173,6 +173,7 @@ def run(market: str, subscription_path: str) -> None:
         predictions,
         earnings_reminder,
         accuracy_notes,
+        pipeline_context=pipeline_context,
     )
 
     print(f"AI summary length={len(ai_summary)}")

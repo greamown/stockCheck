@@ -42,7 +42,7 @@ def load_pipeline_context(market: str, symbols: List[str]) -> Dict[str, Any]:
                 SELECT title, url, published_at, source
                 FROM news_items
                 WHERE market = ? AND symbol = ?
-                ORDER BY published_at DESC
+                ORDER BY COALESCE(NULLIF(published_at, ''), created_at) DESC
                 LIMIT 3
                 """,
                 (market, symbol),

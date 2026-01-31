@@ -13,6 +13,33 @@ except Exception:  # pragma: no cover - optional dependency at runtime
 from .models import InstitutionalSnapshot, TickerSnapshot
 
 
+def _normalize_news_items(items: Any) -> List[Dict[str, str]]:
+    """Normalize news items into a consistent schema:
+    {title, url, published_at, source}
+    """
+    normalized: List[Dict[str, str]] = []
+    if not isinstance(items, list):
+        return normalized
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or "").strip()
+        url = str(raw.get("url") or raw.get("link") or "").strip()
+        published_at = str(raw.get("published_at") or "").strip()
+        source = str(raw.get("source") or raw.get("publisher") or "").strip() or "unknown"
+        if not title and not url:
+            continue
+        normalized.append(
+            {
+                "title": title,
+                "url": url,
+                "published_at": published_at,
+                "source": source,
+            }
+        )
+    return normalized
+
+
 def snapshot_to_dict(snapshot: TickerSnapshot) -> Dict[str, Any]:
     return {
         "symbol": snapshot.symbol,
@@ -25,7 +52,8 @@ def snapshot_to_dict(snapshot: TickerSnapshot) -> Dict[str, Any]:
         "ma200": snapshot.ma200,
         "earnings_date": snapshot.earnings_date,
         "earnings_today": snapshot.earnings_today,
-        "news": snapshot.news,
+        # Keep news in normalized schema.
+        "news": _normalize_news_items(snapshot.news),
     }
 
 
@@ -37,10 +65,32 @@ def build_prompt(
     pipeline_context: Dict[str, Any],
     timestamp: str,
 ) -> str:
+    # Strengthen news usage:
+    # - Prefer pipeline_context news (Google RSS) if available.
+    # - Fall back to yfinance snapshot.news only when pipeline news is missing.
+    watchlist_payload: List[Dict[str, Any]] = []
+    for s in snapshots:
+        base = snapshot_to_dict(s)
+        ctx = pipeline_context.get(s.symbol, {}) if isinstance(pipeline_context, dict) else {}
+        ctx_news = _normalize_news_items(ctx.get("news"))
+        if ctx_news:
+            base["news"] = ctx_news
+            base["news_note"] = "來源：pipeline/google_news（優先）"
+        else:
+            base["news"] = _normalize_news_items(s.news)
+            base["news_note"] = "來源：yfinance（備援，可能較少/較不完整）"
+        # Include a tiny slice of pipeline indicators/sentiment metadata (if present) without duplicating raw tables.
+        if isinstance(ctx, dict):
+            if ctx.get("indicators"):
+                base["pipeline_indicators"] = ctx.get("indicators")
+            if ctx.get("sentiment"):
+                base["pipeline_sentiment"] = ctx.get("sentiment")
+        watchlist_payload.append(base)
+
     data = {
         "market": market,
         "timestamp": timestamp,
-        "watchlist": [snapshot_to_dict(s) for s in snapshots],
+        "watchlist": watchlist_payload,
         "indices": [snapshot_to_dict(s) for s in indices],
         "institutional": [
             {
@@ -51,6 +101,7 @@ def build_prompt(
             }
             for item in institutional
         ],
+        # Keep pipeline context for transparency/debugging, but the model should primarily use watchlist[*].news.
         "pipeline": pipeline_context,
     }
     schema = {
@@ -61,6 +112,7 @@ def build_prompt(
         "請用中文輸出 JSON，且只輸出 JSON。"
         "summary 需 400-600 字，分成三段：大盤、重要個股、風險。"
         "predictions 要針對 watchlist symbol，輸出 up/down/neutral。"
+        "請在 summary 的『重要個股』段落，至少引用 1-2 則 watchlist[*].news 的標題重點（不用逐字貼全文）。"
         "JSON schema: "
         + json.dumps(schema, ensure_ascii=False)
         + "資料如下："
